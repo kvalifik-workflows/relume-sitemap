@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
+import { once } from "node:events";
 import { gzipSync } from "node:zlib";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
@@ -31,6 +33,99 @@ function runFailure(args, options = {}) {
   assert.notEqual(result.status, 0, `Expected command to fail: ${args.join(" ")}`);
   return `${result.stdout}\n${result.stderr}`;
 }
+
+function runAsync(args, options = {}) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(process.execPath, [cli, ...args], {
+      cwd: root,
+      env: { ...process.env, ...options.env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", rejectRun);
+    child.on("close", (status) => {
+      if (status !== 0) {
+        rejectRun(new Error(`Command failed: ${args.join(" ")}\n${stdout}\n${stderr}`));
+        return;
+      }
+      resolveRun(stdout);
+    });
+  });
+}
+
+async function startFixtureServer() {
+  const pages = new Map([
+    [
+      "/",
+      '<!doctype html><title>Fixture Home</title><meta name="description" content="Home from local server."><main><h1>Fixture Home</h1><a href="/about">About</a><a href="/services">Services</a></main>',
+    ],
+    [
+      "/about",
+      '<!doctype html><title>About | Fixture</title><meta name="description" content="About from local server."><main><h1>About</h1></main>',
+    ],
+    [
+      "/services",
+      '<!doctype html><title>Services | Fixture</title><meta name="description" content="Services from local server."><main><h1>Services</h1><a href="/services/websites">Websites</a></main>',
+    ],
+    [
+      "/services/websites",
+      '<!doctype html><title>Websites | Fixture</title><meta name="description" content="Websites from local server."><main><h1>Websites</h1></main>',
+    ],
+  ]);
+  const server = createServer((request, response) => {
+    if (request.url === "/sitemap.xml") {
+      const origin = `http://${request.headers.host}`;
+      response.writeHead(200, { "content-type": "application/xml" });
+      response.end(
+        [
+          '<?xml version="1.0" encoding="UTF-8"?>',
+          '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+          ...[...pages.keys()].map((path) => `  <url><loc>${origin}${path}</loc></url>`),
+          "</urlset>",
+          "",
+        ].join("\n"),
+      );
+      return;
+    }
+
+    const html = pages.get(request.url);
+    if (html) {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(html);
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "text/plain" });
+    response.end("not found");
+  });
+  const listening = once(server, "listening");
+  const failed = once(server, "error").then(([error]) => {
+    throw error;
+  });
+  server.listen(0, "127.0.0.1");
+  try {
+    await Promise.race([listening, failed]);
+  } catch (error) {
+    if (error.code === "EPERM" || error.code === "EACCES") {
+      console.warn(`Skipping local HTTP crawl tests: ${error.message}`);
+      return null;
+    }
+    throw error;
+  }
+  const address = server.address();
+  return { server, origin: `http://127.0.0.1:${address.port}` };
+}
+
+let fixtureServer;
 
 try {
   const help = run(["--help"]);
@@ -129,6 +224,26 @@ try {
     ].join("\n"),
   );
   assert.match(run(["inspect", "--sitemap", join(temp, "sitemap-index.xml")]), /Found 2 URLs/);
+
+  const localFixture = await startFixtureServer();
+  if (localFixture) {
+    fixtureServer = localFixture.server;
+    const inspected = await runAsync(["inspect", "--sitemap", `${localFixture.origin}/sitemap.xml`]);
+    assert.match(inspected, /Found 4 URLs/);
+
+    const localCrawlOut = join(temp, "local-crawl");
+    await runAsync(["crawl", "--sitemap", `${localFixture.origin}/sitemap.xml`, "--include", "/", "--out", localCrawlOut, "--concurrency", "2"]);
+    const localCrawl = JSON.parse(readFileSync(join(localCrawlOut, "crawl.json"), "utf8"));
+    assert.equal(localCrawl.stats.urlCount, 4);
+    assert.equal(localCrawl.stats.statusCounts["200"], 4);
+    assert.deepEqual(localCrawl.pages.find((page) => page.path === "/").links, ["/about", "/services"]);
+    assert.deepEqual(localCrawl.pages.find((page) => page.path === "/services").links, ["/services/websites"]);
+  }
+
+  assert.match(runFailure(["validate", "--payload", fixture]), /No data-blocks-payload-v1 attribute found/);
 } finally {
+  if (fixtureServer) {
+    await new Promise((resolveClose) => fixtureServer.close(resolveClose));
+  }
   rmSync(temp, { recursive: true, force: true });
 }
