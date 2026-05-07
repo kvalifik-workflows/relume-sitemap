@@ -1,0 +1,20 @@
+{
+  "name": "kvalifik-tools",
+  "interface": {
+    "displayName": "Kvalifik Tools"
+  },
+  "plugins": [
+    {
+      "name": "relume-sitemap",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex/relume-sitemap"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

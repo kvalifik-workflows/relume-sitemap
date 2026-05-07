@@ -1,0 +1,26 @@
+{
+  "name": "kvalifik-tools",
+  "owner": {
+    "name": "Kvalifik"
+  },
+  "metadata": {
+    "description": "Kvalifik agent tools and workflows.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "relume-sitemap",
+      "source": "./plugins/claude/relume-sitemap",
+      "description": "Generate Relume-ready visual sitemap clipboard payloads from website sitemaps.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Kvalifik"
+      },
+      "homepage": "https://github.com/kvalifik/relume-sitemap",
+      "repository": "https://github.com/kvalifik/relume-sitemap",
+      "license": "MIT",
+      "category": "Productivity",
+      "tags": ["relume", "sitemap", "webflow"]
+    }
+  ]
+}

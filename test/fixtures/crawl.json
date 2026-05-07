@@ -1,0 +1,115 @@
+{
+  "stats": {
+    "crawledAt": "2026-05-07T00:00:00.000Z",
+    "sourceSitemap": "fixtures",
+    "include": "/",
+    "baseUrl": "https://example.com",
+    "urlCount": 4,
+    "statusCounts": {
+      "200": 4
+    },
+    "typeCounts": {
+      "home": 1,
+      "page": 3
+    }
+  },
+  "pages": [
+    {
+      "url": "https://example.com/",
+      "path": "/",
+      "status": 200,
+      "canonical": "https://example.com/",
+      "name": "Example Home",
+      "title": "Example Home",
+      "description": "A homepage used by the smoke test.",
+      "type": "home",
+      "headings": [
+        {
+          "level": 1,
+          "text": "Example Home"
+        }
+      ],
+      "links": [
+        "/about",
+        "/services"
+      ],
+      "sections": [
+        {
+          "name": "Hero Header Section",
+          "description": "Example Home. A homepage used by the smoke test."
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/about",
+      "path": "/about",
+      "status": 200,
+      "canonical": "https://example.com/about",
+      "name": "About",
+      "title": "About",
+      "description": "About page fixture.",
+      "type": "page",
+      "headings": [
+        {
+          "level": 1,
+          "text": "About"
+        }
+      ],
+      "links": [],
+      "sections": [
+        {
+          "name": "Hero Header Section",
+          "description": "About. About page fixture."
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/services",
+      "path": "/services",
+      "status": 200,
+      "canonical": "https://example.com/services",
+      "name": "Services",
+      "title": "Services",
+      "description": "Services overview fixture.",
+      "type": "page",
+      "headings": [
+        {
+          "level": 1,
+          "text": "Services"
+        }
+      ],
+      "links": [
+        "/services/websites"
+      ],
+      "sections": [
+        {
+          "name": "Hero Header Section",
+          "description": "Services. Services overview fixture."
+        }
+      ]
+    },
+    {
+      "url": "https://example.com/services/websites",
+      "path": "/services/websites",
+      "status": 200,
+      "canonical": "https://example.com/services/websites",
+      "name": "Websites",
+      "title": "Websites",
+      "description": "Website service fixture.",
+      "type": "page",
+      "headings": [
+        {
+          "level": 1,
+          "text": "Websites"
+        }
+      ],
+      "links": [],
+      "sections": [
+        {
+          "name": "Hero Header Section",
+          "description": "Websites. Website service fixture."
+        }
+      ]
+    }
+  ]
+}

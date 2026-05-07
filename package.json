@@ -1,0 +1,47 @@
+{
+  "name": "@kvalifik/relume-sitemap",
+  "version": "0.1.0",
+  "description": "Generate Relume-compatible sitemap clipboard payloads from XML sitemaps and crawled pages.",
+  "type": "module",
+  "bin": {
+    "relume-sitemap": "./bin/relume-sitemap.mjs"
+  },
+  "scripts": {
+    "test": "node ./test/smoke.mjs",
+    "smoke": "node ./bin/relume-sitemap.mjs --help"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    ".agents/",
+    ".claude-plugin/",
+    "bin/",
+    "scripts/",
+    "examples/",
+    "skills/",
+    "plugins/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "relume",
+    "sitemap",
+    "crawler",
+    "webflow",
+    "agent-skills"
+  ],
+  "homepage": "https://github.com/kvalifik/relume-sitemap#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kvalifik/relume-sitemap.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kvalifik/relume-sitemap/issues"
+  },
+  "author": "Kvalifik",
+  "license": "MIT"
+}

@@ -1,0 +1,43 @@
+ObjC.import("AppKit");
+ObjC.import("Foundation");
+
+function unwrap(value) {
+  return ObjC.unwrap(value);
+}
+
+function usage() {
+  console.log("Usage: osascript -l JavaScript scripts/copy-relume-payload.jxa dist/relume-payload.html");
+}
+
+const args = $.NSProcessInfo.processInfo.arguments;
+const payloadPath = unwrap(args.objectAtIndex(args.count - 1));
+
+if (!payloadPath || payloadPath.endsWith(".jxa")) {
+  usage();
+  $.exit(1);
+}
+
+const expandedPath = unwrap($(payloadPath).stringByStandardizingPath);
+const errorRef = Ref();
+const html = $.NSString.stringWithContentsOfFileEncodingError(
+  expandedPath,
+  $.NSUTF8StringEncoding,
+  errorRef,
+);
+
+if (!html) {
+  console.log(`Could not read payload file: ${expandedPath}`);
+  $.exit(1);
+}
+
+const htmlData = html.dataUsingEncoding($.NSUTF8StringEncoding);
+const pasteboard = $.NSPasteboard.generalPasteboard;
+
+pasteboard.clearContents;
+pasteboard.setStringForType(
+  $("Relume sitemap clipboard payload"),
+  $.NSPasteboardTypeString,
+);
+pasteboard.setDataForType(htmlData, $.NSPasteboardTypeHTML);
+
+console.log(`Copied Relume HTML payload to clipboard: ${expandedPath}`);
