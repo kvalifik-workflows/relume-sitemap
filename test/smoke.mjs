@@ -91,6 +91,16 @@ try {
   const ungroupedNode = prefixPayload.state.subPages.find((page) => page.name === "Ungrouped");
   assert.deepEqual(blogNode.subPages.map((page) => page.name), ["Post"]);
   assert.deepEqual(ungroupedNode.subPages.map((page) => page.name), ["Blogger"]);
+
+  const escapingConfig = join(temp, "escaping-config.json");
+  writeFileSync(escapingConfig, `${JSON.stringify({ siteName: '<Site & "Name">' }, null, 2)}\n`);
+  const escapingOut = join(temp, "escaping");
+  run(["build", "--crawl", fixture, "--out", escapingOut, "--config", escapingConfig]);
+  const copyPage = readFileSync(join(escapingOut, "copy-to-clipboard.html"), "utf8");
+  const sitemapMarkdown = readFileSync(join(escapingOut, "sitemap.md"), "utf8");
+  assert.doesNotMatch(copyPage, /<title>Copy <Site/);
+  assert.match(copyPage, /Copy &lt;Site &amp; "Name"&gt; Relume Payload/);
+  assert.match(sitemapMarkdown, /^# &lt;Site &amp; "Name"&gt; Visual Sitemap/m);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }
