@@ -23,7 +23,7 @@ const COMMON_TYPE_RULES = [
   ["men-topic", /^\/[^/]+\/men\//],
   ["legal", /\/(privacy-policy|terms-of-service|cookie-policy|web-accessibility)$/],
   ["info", /^\/[^/]+\/info\//],
-  ["home", /^\/[^/]+\/?$/],
+  ["home", /^\/(?:[a-z]{2}(?:-[a-z]{2})?)?\/?$/i],
 ];
 
 function help() {
@@ -777,7 +777,7 @@ function collectGroupPages(pages, group, used) {
   }
   for (const prefix of [group.itemPrefix, ...(group.prefixes ?? [])].filter(Boolean)) {
     for (const page of pages) {
-      if (page.path.startsWith(prefix) && page.path !== group.hubPath && !used.has(page.path)) {
+      if (pathMatchesPrefix(page.path, prefix) && page.path !== group.hubPath && !used.has(page.path)) {
         results.push(page);
       }
     }
@@ -798,8 +798,8 @@ function buildGroup(group, pages, map, used, options = {}) {
   if (hub) used.add(hub.path);
 
   if (group.categoryPrefix && group.itemPrefix) {
-    const categoryPages = sortByName(pages.filter((page) => page.path.startsWith(group.categoryPrefix)));
-    const itemPages = pages.filter((page) => page.path.startsWith(group.itemPrefix));
+    const categoryPages = sortByName(pages.filter((page) => pathMatchesPrefix(page.path, group.categoryPrefix)));
+    const itemPages = pages.filter((page) => pathMatchesPrefix(page.path, group.itemPrefix));
     const assigned = new Set();
     const categoryNodes = categoryPages.map((categoryPage) => {
       used.add(categoryPage.path);
