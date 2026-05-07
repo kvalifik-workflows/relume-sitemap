@@ -930,6 +930,14 @@ function escapeHtmlAttribute(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+function escapeHtmlText(value) {
+  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function markdownText(value) {
+  return escapeHtmlText(value).replace(/\r?\n/g, " ");
+}
+
 function globalSections(siteName = "") {
   return {
     [NAVBAR_ID]: {
@@ -962,19 +970,20 @@ function markdownTree(page) {
     .map((row) => {
       const indent = "  ".repeat(row.depth);
       const source = row.description?.split("\n").filter(Boolean).find((line) => line.startsWith("Source:"));
-      return `${indent}- ${row.name}${row.pageType === "path" ? " (path)" : ""}${source ? ` - ${source}` : ""}`;
+      return `${indent}- ${markdownText(row.name)}${row.pageType === "path" ? " (path)" : ""}${source ? ` - ${markdownText(source)}` : ""}`;
     })
     .join("\n");
 }
 
 function buildCopyPage(clipboardHtml, pageCount, siteName) {
   const htmlLiteral = JSON.stringify(clipboardHtml);
+  const safeSiteName = escapeHtmlText(siteName);
   return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Copy ${siteName} Relume Payload</title>
+    <title>Copy ${safeSiteName} Relume Payload</title>
     <style>
       * { box-sizing: border-box; }
       body { margin: 0; background: #fbfaf7; color: #172026; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
@@ -990,7 +999,7 @@ function buildCopyPage(clipboardHtml, pageCount, siteName) {
   </head>
   <body>
     <main>
-      <h1>Copy ${siteName} Relume Payload</h1>
+      <h1>Copy ${safeSiteName} Relume Payload</h1>
       <p>This writes a Relume-style <code style="display:inline;padding:0;border:0;background:transparent">text/html</code> clipboard payload containing ${pageCount} pages.</p>
       <button type="button" id="copy">Copy Relume Payload</button>
       <p class="status" id="status"></p>
@@ -1077,14 +1086,15 @@ async function commandBuild(args) {
   const payload = { type: "page", state: tree, globalSections: globalSections(config.siteName) };
   const payloadHtml = `<meta charset="utf-8"><p data-blocks-payload-v1="${escapeHtmlAttribute(JSON.stringify(payload))}"></p>`;
   const stats = { ...crawl.stats, relumePageCount, sections: sectionMode };
+  const siteName = config.siteName ?? "Generated";
   writeJson(join(outDir, "sitemap-tree.json"), tree);
   writeJson(join(outDir, "relume-payload.json"), payload);
   writeFileSync(join(outDir, "relume-payload.html"), payloadHtml);
-  writeFileSync(join(outDir, "copy-to-clipboard.html"), buildCopyPage(payloadHtml, relumePageCount, config.siteName ?? "Generated"));
+  writeFileSync(join(outDir, "copy-to-clipboard.html"), buildCopyPage(payloadHtml, relumePageCount, siteName));
   writeFileSync(
     join(outDir, "sitemap.md"),
     [
-      `# ${config.siteName ?? "Generated"} Visual Sitemap`,
+      `# ${markdownText(siteName)} Visual Sitemap`,
       "",
       `Relume payload pages: ${relumePageCount}`,
       "",
