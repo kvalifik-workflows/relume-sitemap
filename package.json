@@ -21,6 +21,7 @@
     ".agents/",
     ".claude-plugin/",
     "bin/",
+    "src/",
     "scripts/",
     "examples/",
     "skills/",

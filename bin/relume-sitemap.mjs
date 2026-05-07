@@ -4,11 +4,20 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { gunzipSync } from "node:zlib";
+import {
+  FOOTER_ID,
+  NAVBAR_ID,
+  commentThreads,
+  countRelumePages,
+  escapeHtmlAttribute,
+  globalSections,
+  sectionReference,
+  sectionValue,
+  validatePayloadHtml,
+} from "../src/relume/payload.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const toolRoot = resolve(here, "..");
-const NAVBAR_ID = "1e81e15b58074facba4b51c5a47e23da";
-const FOOTER_ID = "9a987904c1c24ddfbb686033426a224a";
 const DEFAULT_FETCH_TIMEOUT_MS = 30000;
 const DEFAULT_FETCH_RETRIES = 1;
 
@@ -725,29 +734,6 @@ function buildStats({ sourceSitemap, include, excludes = [], baseUrl, pages, rel
   };
 }
 
-function commentThreads() {
-  return { map: 1 };
-}
-
-function sectionReference(id) {
-  return { id, commentThreads: commentThreads(), type: "reference" };
-}
-
-function sectionValue(name, description) {
-  return {
-    value: {
-      name,
-      description,
-      element: {},
-      aiReason: "",
-      currentShuffleIndex: 0,
-      isComponentOutOfSync: false,
-    },
-    commentThreads: commentThreads(),
-    type: "inline",
-  };
-}
-
 function relumePage(page, subPages = [], pageType = "page", options = {}) {
   const includeSections = options.includeSections !== false;
   const sectionPlan = page.sections?.length ? page.sections : inferSectionPlan(page);
@@ -955,41 +941,12 @@ function buildConfiguredTree(pages, config, options = {}) {
   return relumePage(root, subPages, "page", options);
 }
 
-function countRelumePages(page) {
-  return 1 + (page.subPages ?? []).reduce((total, subPage) => total + countRelumePages(subPage), 0);
-}
-
-function escapeHtmlAttribute(value) {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
 function escapeHtmlText(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function markdownText(value) {
   return escapeHtmlText(value).replace(/\r?\n/g, " ");
-}
-
-function globalSections(siteName = "") {
-  return {
-    [NAVBAR_ID]: {
-      name: "Navbar",
-      description: siteName ? `${siteName} global navigation.` : "Global navigation.",
-      element: {},
-      aiReason: "",
-      currentShuffleIndex: 0,
-      isComponentOutOfSync: false,
-    },
-    [FOOTER_ID]: {
-      name: "Footer",
-      description: siteName ? `${siteName} global footer.` : "Global footer.",
-      element: {},
-      aiReason: "",
-      currentShuffleIndex: 0,
-      isComponentOutOfSync: false,
-    },
-  };
 }
 
 function flattenRelume(page, depth = 0, rows = []) {
@@ -1092,17 +1049,6 @@ function buildCopyPage(clipboardHtml, pageCount, siteName) {
 `;
 }
 
-function decodedPayloadFromHtml(html) {
-  const match = html.match(/data-blocks-payload-v1="([^"]+)"/);
-  if (!match) throw new Error("No data-blocks-payload-v1 attribute found.");
-  const json = match[1]
-    .replace(/&quot;/g, "\"")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&");
-  return JSON.parse(json);
-}
-
 async function commandBuild(args) {
   if (!args.crawl || !args.out) throw new Error("build requires --crawl and --out");
   const crawlPath = absPath(args.crawl);
@@ -1149,18 +1095,6 @@ async function commandBuild(args) {
   if (args.copy) {
     commandCopy({ payload: join(outDir, "relume-payload.html") });
   }
-}
-
-function validatePayloadHtml(html) {
-  const payload = decodedPayloadFromHtml(html);
-  if (payload.type !== "page") throw new Error(`Expected payload.type page, got ${payload.type}`);
-  if (!payload.state?.name) throw new Error("Payload missing state.name");
-  const count = countRelumePages(payload.state);
-  if (count < 1) throw new Error("Payload has no pages");
-  if (!payload.globalSections?.[NAVBAR_ID] || !payload.globalSections?.[FOOTER_ID]) {
-    throw new Error("Payload missing Navbar/Footer global sections");
-  }
-  return { count, rootName: payload.state.name };
 }
 
 function commandValidate(args) {
