@@ -28,11 +28,50 @@ Do not hand-author escaped Relume payload JSON unless patching the CLI itself.
 
 ## Commands
 
+Inspect:
+
 ```bash
 relume-sitemap inspect --sitemap https://www.example.com/sitemap.xml
+```
+
+Discover when the sitemap is missing or sparse:
+
+```bash
 relume-sitemap discover --url https://www.example.com --out ./work/example
-relume-sitemap crawl --sitemap https://www.example.com/sitemap.xml --include / --exclude /da,/de --out ./work/example-en
-relume-sitemap build --crawl ./work/example-en/crawl.json --out ./work/example-en --sections include --copy
+```
+
+Crawl one language/path scope:
+
+```bash
+relume-sitemap crawl \
+  --sitemap https://www.example.com/sitemap.xml \
+  --include / \
+  --exclude /da,/de \
+  --out ./work/example-en
+```
+
+Build with sections:
+
+```bash
+relume-sitemap build \
+  --crawl ./work/example-en/crawl.json \
+  --out ./work/example-en \
+  --sections include \
+  --copy
+```
+
+Build without sections:
+
+```bash
+relume-sitemap build \
+  --crawl ./work/example-en/crawl.json \
+  --out ./work/example-en \
+  --sections none
+```
+
+Validate:
+
+```bash
 relume-sitemap validate --payload ./work/example-en/relume-payload.html
 ```
 
@@ -40,6 +79,21 @@ relume-sitemap validate --payload ./work/example-en/relume-payload.html
 
 - Crawl status counts should be mostly or entirely `200`.
 - Payload validation must pass.
+- The generated root and page count should match expectations.
 - Review `sitemap.md` for hierarchy sanity.
 - Multilingual sites should be scoped to one language/path unless all languages were explicitly requested.
+- The tree should follow URL/folder structure unless the user explicitly asks for custom grouping.
 - Section mode must match the user's choice.
+
+## Outputs
+
+The build command writes:
+
+- `crawl.json`
+- `sitemap-tree.json`
+- `relume-payload.json`
+- `relume-payload.html`
+- `sitemap.md`
+- `copy-to-clipboard.html`
+
+Prefer showing `sitemap.md` for review and using `relume-payload.html` for Relume paste.
