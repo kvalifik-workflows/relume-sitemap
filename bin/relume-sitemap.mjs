@@ -1140,10 +1140,19 @@ function commandValidate(args) {
 function commandCopy(args) {
   if (!args.payload) throw new Error("copy requires --payload");
   const payloadPath = absPath(args.payload);
+  const platform = process.env.RELUME_SITEMAP_TEST_PLATFORM || process.platform;
+  if (platform !== "darwin") {
+    throw new Error(
+      "copy currently requires macOS because it writes a text/html payload through osascript. Use copy-to-clipboard.html in a browser, or copy relume-payload.html from a macOS machine.",
+    );
+  }
   const jxaPath = join(toolRoot, "scripts/copy-relume-payload.jxa");
   const result = spawnSync("osascript", ["-l", "JavaScript", jxaPath, payloadPath], {
     encoding: "utf8",
   });
+  if (result.error) {
+    throw new Error(`osascript failed: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     throw new Error(result.stderr || result.stdout || "osascript failed");
   }

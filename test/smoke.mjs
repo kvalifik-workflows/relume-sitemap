@@ -9,10 +9,11 @@ const cli = join(root, "bin/relume-sitemap.mjs");
 const fixture = join(root, "test/fixtures/crawl.json");
 const temp = mkdtempSync(join(tmpdir(), "relume-sitemap-"));
 
-function run(args) {
+function run(args, options = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: root,
     encoding: "utf8",
+    env: { ...process.env, ...options.env },
   });
   if (result.status !== 0) {
     throw new Error(`Command failed: ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
@@ -20,10 +21,11 @@ function run(args) {
   return result.stdout;
 }
 
-function runFailure(args) {
+function runFailure(args, options = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: root,
     encoding: "utf8",
+    env: { ...process.env, ...options.env },
   });
   assert.notEqual(result.status, 0, `Expected command to fail: ${args.join(" ")}`);
   return `${result.stdout}\n${result.stderr}`;
@@ -43,6 +45,10 @@ try {
   assert.equal(payload.state.name, "Example Home");
   assert.equal(payload.state.subPages.length, 2);
   assert.ok(payload.state.sections.length > 0);
+  assert.match(
+    runFailure(["copy", "--payload", join(withSections, "relume-payload.html")], { env: { RELUME_SITEMAP_TEST_PLATFORM: "linux" } }),
+    /copy currently requires macOS/,
+  );
 
   const withoutSections = join(temp, "without-sections");
   run(["build", "--crawl", fixture, "--out", withoutSections, "--sections", "none"]);
