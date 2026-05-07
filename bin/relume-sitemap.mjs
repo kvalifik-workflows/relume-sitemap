@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { gunzipSync } from "node:zlib";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const toolRoot = resolve(here, "..");
@@ -185,6 +186,12 @@ function inferBaseUrl(urls) {
   return `${parsed.protocol}//${parsed.host}`;
 }
 
+function decodeTextBuffer(buffer) {
+  const bytes = Buffer.from(buffer);
+  const isGzip = bytes[0] === 0x1f && bytes[1] === 0x8b;
+  return (isGzip ? gunzipSync(bytes) : bytes).toString("utf8");
+}
+
 async function readTextResource(input, options = {}) {
   if (/^https?:\/\//.test(input)) {
     const response = await fetchWithRetries(input, {
@@ -194,13 +201,41 @@ async function readTextResource(input, options = {}) {
       },
     }, options);
     if (!response.ok) throw new Error(`Fetch failed for ${input}: HTTP ${response.status}`);
-    return response.text();
+    return decodeTextBuffer(await response.arrayBuffer());
   }
-  return readFileSync(absPath(input), "utf8");
+  return decodeTextBuffer(readFileSync(absPath(input)));
 }
 
 function urlsFromSitemap(xml) {
-  return [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => decodeHtml(match[1].trim()));
+  return [...xml.matchAll(/<loc>\s*(?:<!\[CDATA\[([\s\S]*?)\]\]>|([^<]+))\s*<\/loc>/gi)].map((match) =>
+    decodeHtml((match[1] ?? match[2]).trim()),
+  );
+}
+
+function isSitemapIndex(xml) {
+  return /<sitemapindex\b/i.test(xml);
+}
+
+function resolveSitemapReference(reference, parent) {
+  if (/^https?:\/\//.test(reference)) return reference;
+  if (/^https?:\/\//.test(parent)) return new URL(reference, parent).toString();
+  return absPath(reference, dirname(absPath(parent)));
+}
+
+async function urlsFromSitemapResource(input, options = {}, seen = new Set()) {
+  const key = /^https?:\/\//.test(input) ? input : absPath(input);
+  if (seen.has(key)) return [];
+  seen.add(key);
+
+  const sitemapXml = await readTextResource(input, options);
+  const locs = uniqueOrdered(urlsFromSitemap(sitemapXml));
+  if (!isSitemapIndex(sitemapXml)) return locs;
+
+  const urls = [];
+  for (const loc of locs) {
+    urls.push(...(await urlsFromSitemapResource(resolveSitemapReference(loc, input), options, seen)));
+  }
+  return uniqueOrdered(urls);
 }
 
 function xmlEscape(value) {
@@ -456,8 +491,7 @@ function detectLanguageScopes(urls, baseUrl) {
 
 async function commandInspect(args) {
   if (!args.sitemap) throw new Error("inspect requires --sitemap");
-  const sitemapXml = await readTextResource(args.sitemap);
-  const urls = uniqueOrdered(urlsFromSitemap(sitemapXml));
+  const urls = uniqueOrdered(await urlsFromSitemapResource(args.sitemap));
   const baseUrl = args.base || inferBaseUrl(urls);
   const scopes = detectLanguageScopes(urls, baseUrl);
   console.log(`Found ${urls.length} URLs in ${args.sitemap}.`);
@@ -631,8 +665,7 @@ async function commandCrawl(args) {
     timeoutMs: parsePositiveInteger(args["fetch-timeout"], config.fetchTimeout ?? DEFAULT_FETCH_TIMEOUT_MS, "crawl --fetch-timeout"),
     retries: parseNonNegativeInteger(args.retries, config.retries ?? DEFAULT_FETCH_RETRIES, "crawl --retries", { max: 5 }),
   };
-  const sitemapXml = await readTextResource(args.sitemap, requestOptions);
-  const allUrls = urlsFromSitemap(sitemapXml);
+  const allUrls = await urlsFromSitemapResource(args.sitemap, requestOptions);
   const baseUrl = args.base || config.baseUrl || inferBaseUrl(allUrls);
   const include = args.include.replace(/\/+$/, "") || "/";
   const excludes = parsePathList(args.exclude ?? config.exclude);
