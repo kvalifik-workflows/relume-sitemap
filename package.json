@@ -4,7 +4,7 @@
   "description": "Generate Relume-compatible sitemap clipboard payloads from XML sitemaps and crawled pages.",
   "type": "module",
   "bin": {
-    "relume-sitemap": "./bin/relume-sitemap.mjs"
+    "relume-sitemap": "bin/relume-sitemap.mjs"
   },
   "scripts": {
     "test": "node ./test/smoke.mjs",
