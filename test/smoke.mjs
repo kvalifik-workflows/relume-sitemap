@@ -20,6 +20,15 @@ function run(args) {
   return result.stdout;
 }
 
+function runFailure(args) {
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.notEqual(result.status, 0, `Expected command to fail: ${args.join(" ")}`);
+  return `${result.stdout}\n${result.stderr}`;
+}
+
 try {
   const help = run(["--help"]);
   assert.match(help, /Relume Sitemap Tool/);
@@ -39,6 +48,19 @@ try {
   run(["build", "--crawl", fixture, "--out", withoutSections, "--sections", "none"]);
   const payloadWithoutSections = JSON.parse(readFileSync(join(withoutSections, "relume-payload.json"), "utf8"));
   assert.equal(payloadWithoutSections.state.sections.length, 0);
+
+  assert.match(
+    runFailure(["crawl", "--sitemap", fixture, "--include", "/", "--out", join(temp, "invalid-concurrency"), "--concurrency", "0"]),
+    /crawl --concurrency must be a positive integer/,
+  );
+  assert.match(
+    runFailure(["discover", "--url", "https://example.com", "--out", join(temp, "invalid-max-pages"), "--max-pages", "nope"]),
+    /discover --max-pages must be a positive integer/,
+  );
+  assert.match(
+    runFailure(["crawl", "--sitemap", fixture, "--include", "/", "--out", join(temp, "invalid-retries"), "--retries", "-1"]),
+    /crawl --retries must be a non-negative integer/,
+  );
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }
