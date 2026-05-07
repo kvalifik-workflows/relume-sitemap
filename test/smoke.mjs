@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
 
 const root = resolve(new URL("..", import.meta.url).pathname);
 const cli = join(root, "bin/relume-sitemap.mjs");
@@ -107,6 +108,27 @@ try {
   assert.doesNotMatch(copyPage, /<title>Copy <Site/);
   assert.match(copyPage, /Copy &lt;Site &amp; "Name"&gt; Relume Payload/);
   assert.match(sitemapMarkdown, /^# &lt;Site &amp; "Name"&gt; Visual Sitemap/m);
+
+  const nestedSitemap = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    "  <url><loc><![CDATA[https://example.com/nested-one]]></loc></url>",
+    "  <url><loc>https://example.com/nested-two</loc></url>",
+    "</urlset>",
+    "",
+  ].join("\n");
+  writeFileSync(join(temp, "nested-sitemap.xml.gz"), gzipSync(nestedSitemap));
+  writeFileSync(
+    join(temp, "sitemap-index.xml"),
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+      "  <sitemap><loc>nested-sitemap.xml.gz</loc></sitemap>",
+      "</sitemapindex>",
+      "",
+    ].join("\n"),
+  );
+  assert.match(run(["inspect", "--sitemap", join(temp, "sitemap-index.xml")]), /Found 2 URLs/);
 } finally {
   rmSync(temp, { recursive: true, force: true });
 }
