@@ -8,6 +8,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const toolRoot = resolve(here, "..");
 const NAVBAR_ID = "1e81e15b58074facba4b51c5a47e23da";
 const FOOTER_ID = "9a987904c1c24ddfbb686033426a224a";
+const DEFAULT_FETCH_TIMEOUT_MS = 30000;
+const DEFAULT_FETCH_RETRIES = 1;
 
 const COMMON_TYPE_RULES = [
   ["article-category", /^\/[^/]+\/articles-categories\//],
@@ -29,8 +31,8 @@ function help() {
 
 Usage:
   relume-sitemap inspect --sitemap <url-or-file>
-  relume-sitemap discover --url <url> --out <dir> [--max-pages 500] [--concurrency 6] [--include /] [--exclude /da,/fr]
-  relume-sitemap crawl --sitemap <url-or-file> --include <path-prefix> --out <dir> [--concurrency 6]
+  relume-sitemap discover --url <url> --out <dir> [--max-pages 500] [--concurrency 6] [--fetch-timeout 30000] [--retries 1] [--include /] [--exclude /da,/fr]
+  relume-sitemap crawl --sitemap <url-or-file> --include <path-prefix> --out <dir> [--concurrency 6] [--fetch-timeout 30000] [--retries 1]
   relume-sitemap build --crawl <crawl.json> --out <dir> [--config <config.json>] [--sections include|none] [--custom-groups] [--copy]
   relume-sitemap copy --payload <relume-payload.html>
   relume-sitemap validate --payload <relume-payload.html>
@@ -79,6 +81,68 @@ function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function parsePositiveInteger(value, fallback, label, options = {}) {
+  const raw = value ?? fallback;
+  const number = Number(raw);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  if (options.max && number > options.max) {
+    throw new Error(`${label} must be less than or equal to ${options.max}.`);
+  }
+  return number;
+}
+
+function parseNonNegativeInteger(value, fallback, label, options = {}) {
+  const raw = value ?? fallback;
+  const number = Number(raw);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+  if (options.max && number > options.max) {
+    throw new Error(`${label} must be less than or equal to ${options.max}.`);
+  }
+  return number;
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+function abortMessage(error) {
+  return error?.name === "AbortError" ? "request timed out" : error.message;
+}
+
+async function fetchWithTimeout(url, options = {}, fetchOptions = {}) {
+  const timeoutMs = fetchOptions.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    throw new Error(`Fetch failed for ${url}: ${abortMessage(error)}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchWithRetries(url, options = {}, fetchOptions = {}) {
+  const retries = fetchOptions.retries ?? DEFAULT_FETCH_RETRIES;
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      const response = await fetchWithTimeout(url, options, fetchOptions);
+      if (response.status < 500 || attempt === retries) return response;
+      lastError = new Error(`Fetch failed for ${url}: HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+      if (attempt === retries) break;
+    }
+    await sleep(250 * (attempt + 1));
+  }
+  throw lastError;
+}
+
 function normalizeSectionMode(value = "include") {
   if (value === true) throw new Error("--sections requires a value: include or none");
   const normalized = String(value).toLowerCase();
@@ -121,14 +185,14 @@ function inferBaseUrl(urls) {
   return `${parsed.protocol}//${parsed.host}`;
 }
 
-async function readTextResource(input) {
+async function readTextResource(input, options = {}) {
   if (/^https?:\/\//.test(input)) {
-    const response = await fetch(input, {
+    const response = await fetchWithRetries(input, {
       headers: {
         "User-Agent": "Relume Sitemap Tool",
         Accept: "application/xml,text/xml,text/html,*/*",
       },
-    });
+    }, options);
     if (!response.ok) throw new Error(`Fetch failed for ${input}: HTTP ${response.status}`);
     return response.text();
   }
@@ -343,13 +407,13 @@ async function mapWithConcurrency(items, worker, concurrency) {
   return results;
 }
 
-async function fetchPage(url) {
-  const response = await fetch(url, {
+async function fetchPage(url, options = {}) {
+  const response = await fetchWithRetries(url, {
     headers: {
       "User-Agent": "Relume Sitemap Tool",
       Accept: "text/html,application/xhtml+xml",
     },
-  });
+  }, options);
   return { status: response.status, html: await response.text() };
 }
 
@@ -446,14 +510,14 @@ function extractDiscoverableLinks(html, baseUrl, canonicalHost, allowedHosts) {
   return [...links];
 }
 
-async function fetchDiscoveryPage(url, canonicalHost, allowedHosts) {
-  const response = await fetch(url, {
+async function fetchDiscoveryPage(url, canonicalHost, allowedHosts, options = {}) {
+  const response = await fetchWithRetries(url, {
     redirect: "follow",
     headers: {
       "User-Agent": "Relume Sitemap Tool",
       Accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
     },
-  });
+  }, options);
   const contentType = response.headers.get("content-type") ?? "";
   const finalUrl = normalizeDiscoveredUrl(response.url, url, canonicalHost, allowedHosts) || url;
   const html = contentType.includes("text/html") ? await response.text() : "";
@@ -480,9 +544,14 @@ async function commandDiscover(args) {
 
   const include = normalizePath(args.include ?? "/");
   const excludes = parsePathList(args.exclude);
-  const maxPages = Number(args["max-pages"] ?? 500);
-  const concurrency = Number(args.concurrency ?? 6);
+  const maxPages = parsePositiveInteger(args["max-pages"], 500, "discover --max-pages", { max: 10000 });
+  const concurrency = parsePositiveInteger(args.concurrency, 6, "discover --concurrency", { max: 50 });
+  const requestOptions = {
+    timeoutMs: parsePositiveInteger(args["fetch-timeout"], DEFAULT_FETCH_TIMEOUT_MS, "discover --fetch-timeout"),
+    retries: parseNonNegativeInteger(args.retries, DEFAULT_FETCH_RETRIES, "discover --retries", { max: 5 }),
+  };
   const startUrl = normalizeDiscoveredUrl(start.toString(), start.toString(), canonicalHost, allowedHosts);
+  if (!startUrl) throw new Error(`Could not normalize start URL: ${args.url}`);
   const queue = [startUrl];
   const seen = new Set(queue);
   const pages = [];
@@ -499,7 +568,7 @@ async function commandDiscover(args) {
       cursor += 1;
       const url = queue[index];
       try {
-        const page = await fetchDiscoveryPage(url, canonicalHost, allowedHosts);
+        const page = await fetchDiscoveryPage(url, canonicalHost, allowedHosts, requestOptions);
         pages.push(page);
         if (page.status >= 200 && page.status < 400 && page.contentType.includes("text/html")) {
           for (const link of page.links) {
@@ -558,7 +627,11 @@ async function commandCrawl(args) {
   ensureDir(outDir);
 
   const config = args.config ? readJson(absPath(args.config)) : {};
-  const sitemapXml = await readTextResource(args.sitemap);
+  const requestOptions = {
+    timeoutMs: parsePositiveInteger(args["fetch-timeout"], config.fetchTimeout ?? DEFAULT_FETCH_TIMEOUT_MS, "crawl --fetch-timeout"),
+    retries: parseNonNegativeInteger(args.retries, config.retries ?? DEFAULT_FETCH_RETRIES, "crawl --retries", { max: 5 }),
+  };
+  const sitemapXml = await readTextResource(args.sitemap, requestOptions);
   const allUrls = urlsFromSitemap(sitemapXml);
   const baseUrl = args.base || config.baseUrl || inferBaseUrl(allUrls);
   const include = args.include.replace(/\/+$/, "") || "/";
@@ -568,14 +641,14 @@ async function commandCrawl(args) {
     return pathMatchesPrefix(path, include) && !excludes.some((exclude) => pathMatchesPrefix(path, exclude));
   });
   const pathSet = new Set(urls.map((url) => normalizePath(url, baseUrl)));
-  const concurrency = Number(args.concurrency ?? config.concurrency ?? 6);
+  const concurrency = parsePositiveInteger(args.concurrency, config.concurrency ?? 6, "crawl --concurrency", { max: 50 });
 
   console.log(`Found ${urls.length} URLs under ${include}${excludes.length ? ` excluding ${excludes.join(", ")}` : ""}.`);
   const pages = await mapWithConcurrency(
     urls,
     async (url) => {
       try {
-        const { status, html } = await fetchPage(url);
+        const { status, html } = await fetchPage(url, requestOptions);
         const page = extractPageData(url, html, status, pathSet, baseUrl, config);
         page.sections = inferSectionPlan(page);
         return page;
