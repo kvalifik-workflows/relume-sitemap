@@ -98,7 +98,7 @@ The wrappers intentionally stay thin. The CLI is the source of truth.
 Install the marketplace from GitHub:
 
 ```bash
-codex plugin marketplace add kvalifik/relume-sitemap
+codex plugin marketplace add kvalifik-workflows/relume-sitemap
 ```
 
 Then open the Codex plugin directory, choose `Kvalifik Tools`, and install `Relume Sitemap`.
@@ -106,7 +106,7 @@ Then open the Codex plugin directory, choose `Kvalifik Tools`, and install `Relu
 For local skill-only installation, use Codex's skill installer with:
 
 ```text
-https://github.com/kvalifik/relume-sitemap/tree/main/skills/relume-sitemap
+https://github.com/kvalifik-workflows/relume-sitemap/tree/main/skills/relume-sitemap
 ```
 
 ### Claude Code
@@ -114,7 +114,7 @@ https://github.com/kvalifik/relume-sitemap/tree/main/skills/relume-sitemap
 Install the marketplace from GitHub:
 
 ```text
-/plugin marketplace add kvalifik/relume-sitemap
+/plugin marketplace add kvalifik-workflows/relume-sitemap
 /plugin install relume-sitemap@kvalifik-tools
 ```
 

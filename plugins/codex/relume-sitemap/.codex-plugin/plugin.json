@@ -1,13 +1,13 @@
 {
   "name": "relume-sitemap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generate Relume-ready visual sitemap clipboard payloads from website sitemaps.",
   "author": {
     "name": "Kvalifik",
     "url": "https://kvalifik.dk"
   },
-  "homepage": "https://github.com/kvalifik/relume-sitemap",
-  "repository": "https://github.com/kvalifik/relume-sitemap",
+  "homepage": "https://github.com/kvalifik-workflows/relume-sitemap",
+  "repository": "https://github.com/kvalifik-workflows/relume-sitemap",
   "license": "MIT",
   "keywords": ["relume", "sitemap", "webflow", "crawler"],
   "skills": "./skills/",
@@ -18,7 +18,7 @@
     "developerName": "Kvalifik",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "websiteURL": "https://github.com/kvalifik/relume-sitemap",
+    "websiteURL": "https://github.com/kvalifik-workflows/relume-sitemap",
     "defaultPrompt": [
       "Create a Relume sitemap for this website.",
       "Generate a Relume-ready sitemap payload from this XML sitemap."
