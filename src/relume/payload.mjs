@@ -9,11 +9,28 @@ export function sectionReference(id) {
   return { id, commentThreads: commentThreads(), type: "reference" };
 }
 
+function cleanSectionName(value = "", fallback = "Content") {
+  const text = String(value)
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 90)
+    .replace(/[.?!]+$/g, "")
+    .replace(/\s+section$/i, "")
+    .trim();
+  return text || fallback;
+}
+
+function cleanSectionDescription(value = "") {
+  const text = String(value).replace(/\s+/g, " ").trim().slice(0, 520);
+  if (/^Page section focused on "[^"]+"\.$/i.test(text)) return "";
+  return text;
+}
+
 export function sectionValue(name, description) {
   return {
     value: {
-      name,
-      description,
+      name: cleanSectionName(name),
+      description: cleanSectionDescription(description),
       element: {},
       aiReason: "",
       currentShuffleIndex: 0,

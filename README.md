@@ -48,6 +48,17 @@ relume-sitemap build \
   --copy
 ```
 
+For cleaner agent-authored sections, write a `section-overrides.json` file from the crawled page evidence and build with:
+
+```bash
+relume-sitemap build \
+  --crawl ./work/example-en/crawl.json \
+  --out ./work/example-en \
+  --sections ai \
+  --section-overrides ./work/example-en/section-overrides.json \
+  --copy
+```
+
 Then paste into Relume's sitemap canvas with `Cmd+V` on macOS.
 
 ## Commands
@@ -56,12 +67,33 @@ Then paste into Relume's sitemap canvas with `Cmd+V` on macOS.
 relume-sitemap inspect --sitemap <url-or-file>
 relume-sitemap discover --url <url> --out <dir> [--max-pages 500] [--include /] [--exclude /da,/fr]
 relume-sitemap crawl --sitemap <url-or-file> --include <path-prefix> --out <dir> [--exclude /da,/fr]
-relume-sitemap build --crawl <crawl.json> --out <dir> [--sections include|none] [--copy]
+relume-sitemap analyze-cms --crawl <crawl.json> [--json]
+relume-sitemap build --crawl <crawl.json> --out <dir> [--sections include|none|ai] [--section-overrides <json>] [--cms-mode expanded|templates] [--copy]
 relume-sitemap validate --payload <relume-payload.html>
 relume-sitemap copy --payload <relume-payload.html>
 ```
 
 Use `discover` when a public XML sitemap is missing, sparse, or only contains the homepage. It writes `discovered-sitemap.xml`, which can then be passed to `crawl`.
+
+Run `analyze-cms` after crawling to detect collection-like URL folders such as `/blog/*`, `/cases/*`, or `/events/*`. Use `--cms-mode expanded` to keep item URLs as pages, or `--cms-mode templates` to collapse likely collections into one template page per folder.
+
+`--section-overrides` accepts either an object keyed by page path or a `pages` array:
+
+```json
+{
+  "pages": [
+    {
+      "path": "/",
+      "sections": [
+        { "name": "Hero", "description": "" },
+        { "name": "Featured Work", "description": "" }
+      ]
+    }
+  ]
+}
+```
+
+Section names are normalized so they do not end in `Section`, and empty descriptions are valid.
 
 ## Outputs
 
@@ -72,6 +104,7 @@ The `build` command writes:
 - `relume-payload.json`
 - `relume-payload.html`
 - `sitemap.md`
+- `section-overrides.json` when authored by the agent or user
 - `copy-to-clipboard.html`
 
 `relume-payload.html` is the clipboard fragment Relume reads. `sitemap.md` is the easiest review file.

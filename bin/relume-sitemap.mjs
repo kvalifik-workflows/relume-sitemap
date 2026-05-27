@@ -36,6 +36,48 @@ const COMMON_TYPE_RULES = [
   ["home", /^\/(?:[a-z]{2}(?:-[a-z]{2})?)?\/?$/i],
 ];
 
+const CMS_COLLECTION_LABELS = new Map([
+  ["articles-categories", "Articles Category"],
+  ["article-categories", "Article Category"],
+  ["news-categories", "News Category"],
+  ["categories", "Category"],
+  ["topics", "Topic"],
+  ["articles", "Article"],
+  ["article", "Article"],
+  ["blog", "Blog Post"],
+  ["blogs", "Blog Post"],
+  ["posts", "Post"],
+  ["news", "News Article"],
+  ["insights", "Insight"],
+  ["resources", "Resource"],
+  ["guides", "Guide"],
+  ["ebooks", "Ebook"],
+  ["whitepapers", "Whitepaper"],
+  ["case-studies", "Case Study"],
+  ["cases", "Case Study"],
+  ["success-stories", "Success Story"],
+  ["projects", "Project"],
+  ["project", "Project"],
+  ["work", "Project"],
+  ["portfolio", "Project"],
+  ["events", "Event"],
+  ["webinars", "Webinar"],
+  ["press", "Press Item"],
+  ["questions", "Question"],
+  ["faqs", "Question"],
+  ["experts", "Expert"],
+  ["team", "Team Member"],
+  ["people", "Person"],
+  ["authors", "Author"],
+  ["locations", "Location"],
+  ["products", "Product"],
+  ["jobs", "Job"],
+  ["careers", "Job"],
+  ["recipes", "Recipe"],
+]);
+
+const CMS_PAGE_TYPES = new Set(["article", "news", "question", "expert", "success-story"]);
+
 function help() {
   console.log(`Relume Sitemap Tool
 
@@ -43,7 +85,8 @@ Usage:
   relume-sitemap inspect --sitemap <url-or-file>
   relume-sitemap discover --url <url> --out <dir> [--max-pages 500] [--concurrency 6] [--fetch-timeout 30000] [--retries 1] [--include /] [--exclude /da,/fr]
   relume-sitemap crawl --sitemap <url-or-file> --include <path-prefix> --out <dir> [--concurrency 6] [--fetch-timeout 30000] [--retries 1]
-  relume-sitemap build --crawl <crawl.json> --out <dir> [--config <config.json>] [--sections include|none] [--custom-groups] [--copy]
+  relume-sitemap analyze-cms --crawl <crawl.json> [--config <config.json>] [--json]
+  relume-sitemap build --crawl <crawl.json> --out <dir> [--config <config.json>] [--sections include|none|ai] [--section-overrides <json>] [--cms-mode expanded|templates] [--cms-include /blog,/projects] [--cms-exclude /team] [--custom-groups] [--copy]
   relume-sitemap copy --payload <relume-payload.html>
   relume-sitemap validate --payload <relume-payload.html>
 
@@ -51,7 +94,9 @@ Examples:
   relume-sitemap inspect --sitemap https://www.example.com/sitemap.xml
   relume-sitemap discover --url https://www.example.com --out ./work/example
   relume-sitemap crawl --sitemap https://www.example.com/sitemap.xml --include / --exclude /da --out ./work/example-en
-  relume-sitemap build --crawl ./work/example/crawl.json --sections include --out ./work/example --copy
+  relume-sitemap analyze-cms --crawl ./work/example-en/crawl.json
+  relume-sitemap build --crawl ./work/example/crawl.json --sections include --cms-mode expanded --out ./work/example --copy
+  relume-sitemap build --crawl ./work/example/crawl.json --sections ai --section-overrides ./work/example/section-overrides.json --out ./work/example-ai
 `);
 }
 
@@ -89,6 +134,32 @@ function readJson(path) {
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function truncateText(value = "", maxLength = 500) {
+  const text = String(value).replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}...` : text;
+}
+
+function cleanSectionName(value = "", fallback = "Content") {
+  const text = truncateText(value, 90)
+    .replace(/[.?!]+$/g, "")
+    .replace(/\s+section$/i, "")
+    .trim();
+  return text || fallback;
+}
+
+function cleanSectionDescription(value = "") {
+  const text = truncateText(value, 520);
+  if (/^Page section focused on "[^"]+"\.$/i.test(text)) return "";
+  return text;
+}
+
+function sectionPlanItem(name, description = "", fallback = "Content") {
+  return {
+    name: cleanSectionName(name, fallback),
+    description: cleanSectionDescription(description),
+  };
 }
 
 function parsePositiveInteger(value, fallback, label, options = {}) {
@@ -154,11 +225,20 @@ async function fetchWithRetries(url, options = {}, fetchOptions = {}) {
 }
 
 function normalizeSectionMode(value = "include") {
-  if (value === true) throw new Error("--sections requires a value: include or none");
+  if (value === true) throw new Error("--sections requires a value: include, none, or ai");
   const normalized = String(value).toLowerCase();
   if (["include", "sections", "with", "yes", "true"].includes(normalized)) return "include";
   if (["none", "omit", "without", "no", "false"].includes(normalized)) return "none";
-  throw new Error(`Unknown --sections mode "${value}". Use "include" or "none".`);
+  if (["ai", "condensed", "smart", "ai-condensed"].includes(normalized)) return "ai";
+  throw new Error(`Unknown --sections mode "${value}". Use "include", "none", or "ai".`);
+}
+
+function normalizeCmsMode(value = "expanded") {
+  if (value === true) throw new Error("--cms-mode requires a value: expanded or templates");
+  const normalized = String(value).toLowerCase();
+  if (["expanded", "items", "all", "pages", "individual", "subpages"].includes(normalized)) return "expanded";
+  if (["templates", "template", "collapsed", "collapse"].includes(normalized)) return "templates";
+  throw new Error(`Unknown --cms-mode "${value}". Use "expanded" or "templates".`);
 }
 
 function parsePathList(value) {
@@ -323,6 +403,23 @@ function extractHeadings(html) {
   });
 }
 
+function extractTextBlocks(html) {
+  const content = mainHtml(html);
+  const blocks = [];
+  for (const match of content.matchAll(/<(h[1-4]|p|li|blockquote)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
+    const tag = match[1].toLowerCase();
+    const text = cleanText(match[2]);
+    if (!text || text.length < 4 || text.length > 260) continue;
+    if (/^(search|country|featured news|read more|get started|previous|next)$/i.test(text)) continue;
+    blocks.push({ type: tag, text });
+    if (blocks.length >= 80) break;
+  }
+  return uniqueOrdered(blocks.map((block) => `${block.type}:${block.text}`)).map((packed) => {
+    const [type, ...parts] = packed.split(":");
+    return { type, text: parts.join(":") };
+  });
+}
+
 function extractLinks(html, pathSet, baseUrl) {
   const links = [];
   for (const match of html.matchAll(/href=(?:"([^"]+)"|'([^']+)')/gi)) {
@@ -369,67 +466,361 @@ function inferPageType(path, config = {}) {
   return "page";
 }
 
+function pathParts(path) {
+  return path.split("/").filter(Boolean);
+}
+
+function parentPathFor(path) {
+  const parts = pathParts(path);
+  if (parts.length <= 1) return "/";
+  return `/${parts.slice(0, -1).join("/")}`;
+}
+
+function lastPathSegment(path) {
+  return pathParts(path).at(-1) ?? "";
+}
+
+function isLocaleSegment(segment) {
+  return /^[a-z]{2}(?:-[a-z]{2})?$/i.test(segment);
+}
+
+function hasDescendantPath(path, pathSet) {
+  const prefix = `${path}/`;
+  for (const candidate of pathSet) {
+    if (candidate.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+function typeLabel(type) {
+  const labels = {
+    article: "Article",
+    news: "News Article",
+    question: "Question",
+    expert: "Expert",
+    "success-story": "Success Story",
+  };
+  return labels[type] ?? "";
+}
+
+function singularTitle(title) {
+  if (/ies$/i.test(title)) return title.replace(/ies$/i, "y");
+  if (/s$/i.test(title) && !/ss$/i.test(title)) return title.replace(/s$/i, "");
+  return title;
+}
+
+function configuredCmsRules(config = {}) {
+  return (config.cmsCollections ?? [])
+    .map((entry) => (typeof entry === "string" ? { path: entry } : entry))
+    .map((entry) => ({
+      ...entry,
+      path: normalizePath(entry.path ?? entry.parentPath ?? entry.prefix ?? ""),
+    }))
+    .filter((entry) => entry.path && entry.path !== "/");
+}
+
+function detectCmsCollections(pages, config = {}) {
+  const pathSet = new Set(pages.map((page) => page.path));
+  const configuredRules = configuredCmsRules(config);
+  const leavesByParent = new Map();
+
+  for (const page of pages) {
+    const parts = pathParts(page.path);
+    if (parts.length < 2) continue;
+    if (hasDescendantPath(page.path, pathSet)) continue;
+    const parentPath = parentPathFor(page.path);
+    if (parentPath === "/") continue;
+    if (!leavesByParent.has(parentPath)) leavesByParent.set(parentPath, []);
+    leavesByParent.get(parentPath).push(page);
+  }
+
+  const collections = [];
+  for (const [parentPath, items] of leavesByParent) {
+    const segment = lastPathSegment(parentPath).toLowerCase();
+    const parentParts = pathParts(parentPath);
+    const configured = configuredRules.find((rule) => parentPath === rule.path || pathMatchesPrefix(parentPath, rule.path));
+    const labelFromSegment = CMS_COLLECTION_LABELS.get(segment);
+    const dominantType = mostCommon(items.map((item) => item.type).filter((type) => type && type !== "page"));
+    const typeBasedLabel = typeLabel(dominantType);
+    const itemCount = items.length;
+    const slugLikeCount = items.filter((item) => isSlugLike(lastPathSegment(item.path))).length;
+    const likelySegment = Boolean(labelFromSegment);
+    const likelyType = Boolean(dominantType && CMS_PAGE_TYPES.has(dominantType));
+    const enoughItems = itemCount >= 5;
+    const configuredLikely = Boolean(configured);
+    const likely = configuredLikely || (enoughItems && (likelySegment || likelyType) && slugLikeCount / itemCount >= 0.7);
+    const possible = likely || (itemCount >= 4 && slugLikeCount / itemCount >= 0.75 && !isLocaleSegment(segment));
+    if (!possible) continue;
+
+    const label = configured?.label ?? labelFromSegment ?? typeBasedLabel ?? singularTitle(titleFromPath(segment));
+    const reasons = [];
+    if (configuredLikely) reasons.push("configured CMS collection");
+    if (likelySegment) reasons.push(`collection-like folder "${segment}"`);
+    if (likelyType) reasons.push(`dominant page type "${dominantType}"`);
+    if (!likelySegment && !likelyType && enoughItems) reasons.push(`${itemCount} slug-like leaf pages`);
+    if (parentParts.some(isLocaleSegment)) reasons.push("nested below locale path");
+    const confidence = likely ? "high" : "medium";
+
+    collections.push({
+      path: parentPath,
+      label,
+      templateName: configured?.templateName ?? `${label} Template`,
+      itemCount,
+      itemPaths: items.map((item) => item.path),
+      items,
+      examplePaths: items.slice(0, 5).map((item) => item.path),
+      confidence,
+      likely,
+      reasons,
+    });
+  }
+
+  return collections.sort((a, b) => b.itemCount - a.itemCount || a.path.localeCompare(b.path));
+}
+
+function mostCommon(values) {
+  const counts = new Map();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+}
+
+function isSlugLike(segment) {
+  if (!segment) return false;
+  if (/^\d+$/.test(segment)) return true;
+  if (/^[a-z0-9]+(?:-[a-z0-9]+){1,}$/i.test(segment)) return true;
+  return segment.length >= 6 && /^[a-z0-9-]+$/i.test(segment);
+}
+
+function cmsCollectionSummary(collection) {
+  return {
+    path: collection.path,
+    itemCount: collection.itemCount,
+    confidence: collection.confidence,
+    likely: collection.likely,
+    templateName: collection.templateName,
+    reasons: collection.reasons,
+    examplePaths: collection.examplePaths,
+  };
+}
+
+function cmsReport(collections) {
+  if (!collections.length) return "No likely CMS collections found from the crawled URL folder layout.";
+  return [
+    `Found ${collections.length} possible CMS collection${collections.length === 1 ? "" : "s"} from URL folders:`,
+    "",
+    ...collections.flatMap((collection) => [
+      `- ${collection.path} -> ${collection.templateName}`,
+      `  Items: ${collection.itemCount}; confidence: ${collection.confidence}; ${collection.likely ? "likely CMS" : "possible CMS"}`,
+      `  Reasons: ${collection.reasons.join(", ")}`,
+      `  Examples: ${collection.examplePaths.join(", ")}`,
+    ]),
+    "",
+    "Ask whether to keep each CMS item as a sub-page or use one template page per collection before running build.",
+  ].join("\n");
+}
+
+function templatePathFor(parentPath, usedPaths) {
+  const base = normalizePath(`${parentPath}/__cms-template`);
+  let candidate = base;
+  let index = 2;
+  while (usedPaths.has(candidate)) {
+    candidate = `${base}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+function cmsTemplateSections(collection) {
+  const representative =
+    collection.items.find((item) => item.sections?.length) ??
+    collection.items.find((item) => item.headings?.length) ??
+    collection.items[0];
+  if (representative?.sections?.length) {
+    return representative.sections.slice(0, 6).map((section) =>
+      sectionPlanItem(section.name.replace(/^(Hero|Header|Article|News Article|Story|Profile|Question)\b/i, "Template"), section.description),
+    );
+  }
+  return [
+    sectionPlanItem("Template Header", `Reusable header for ${collection.label.toLowerCase()} CMS items under ${collection.path}.`),
+    sectionPlanItem("CMS Content Body", `Reusable body layout for item pages in ${collection.path}.`),
+    sectionPlanItem("Related Content", `Links or recommendations related to the current ${collection.label.toLowerCase()} item.`),
+  ];
+}
+
+function cmsTemplatePage(collection, path) {
+  const examples = collection.examplePaths.map((itemPath) => `- ${itemPath}`).join("\n");
+  const description = [
+    `CMS template representing ${collection.itemCount} detected item URLs under ${collection.path}/*.`,
+    "",
+    "Example item URLs:",
+    examples,
+  ].join("\n");
+  return {
+    url: "",
+    path,
+    status: 200,
+    canonical: "",
+    name: collection.templateName,
+    title: collection.templateName,
+    description,
+    descriptionWithUrl: description,
+    type: "cms-template",
+    headings: [],
+    textBlocks: [],
+    links: [],
+    sections: cmsTemplateSections(collection),
+  };
+}
+
+function pathMatchesAny(path, filters) {
+  return filters.some((filter) => path === filter || pathMatchesPrefix(path, filter));
+}
+
+function applyCmsTemplateMode(pages, collections, options = {}) {
+  const include = options.include ?? [];
+  const exclude = options.exclude ?? [];
+  const selectedCollections = collections.filter((collection) => {
+    if (pathMatchesAny(collection.path, exclude)) return false;
+    if (include.length) return pathMatchesAny(collection.path, include);
+    return collection.likely;
+  });
+  if (!selectedCollections.length) return { pages, collapsedCollections: [] };
+
+  const pageIndex = new Map(pages.map((page, index) => [page.path, index]));
+  const usedPaths = new Set(pages.map((page) => page.path));
+  const removedPaths = new Set();
+  const templatesByIndex = new Map();
+  const collapsedCollections = [];
+
+  for (const collection of selectedCollections) {
+    const existingItemPaths = collection.itemPaths.filter((path) => pageIndex.has(path) && !removedPaths.has(path));
+    if (!existingItemPaths.length) continue;
+    for (const path of existingItemPaths) removedPaths.add(path);
+    const firstIndex = Math.min(...existingItemPaths.map((path) => pageIndex.get(path)));
+    const templatePath = templatePathFor(collection.path, usedPaths);
+    usedPaths.add(templatePath);
+    templatesByIndex.set(firstIndex, cmsTemplatePage(collection, templatePath));
+    collapsedCollections.push({ ...cmsCollectionSummary(collection), templatePath });
+  }
+
+  const nextPages = [];
+  for (let index = 0; index < pages.length; index += 1) {
+    if (templatesByIndex.has(index)) nextPages.push(templatesByIndex.get(index));
+    if (!removedPaths.has(pages[index].path)) nextPages.push(pages[index]);
+  }
+  return { pages: nextPages, collapsedCollections };
+}
+
+function sectionOverrideEntries(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (Array.isArray(raw?.pages)) return raw.pages;
+  if (raw?.path && Array.isArray(raw?.sections)) return [raw];
+  return Object.entries(raw ?? {}).map(([path, value]) => ({
+    path,
+    sections: Array.isArray(value) ? value : value?.sections,
+  }));
+}
+
+function loadSectionOverrides(path) {
+  if (!path) return null;
+  const sourcePath = absPath(path);
+  const raw = readJson(sourcePath);
+  const sectionsByPath = new Map();
+  for (const entry of sectionOverrideEntries(raw)) {
+    const path = normalizePath(entry.path);
+    if (!path) throw new Error(`Section override entry is missing a valid path in ${sourcePath}`);
+    const sections = (entry.sections ?? [])
+      .map((section) => sectionPlanItem(section.name, section.description))
+      .filter((section) => section.name);
+    if (!sections.length) throw new Error(`Section override for ${path} has no usable sections`);
+    sectionsByPath.set(path, sections);
+  }
+  return { sourcePath, sectionsByPath };
+}
+
+function applySectionOverrides(pages, overrides) {
+  const existingPaths = new Set(pages.map((page) => page.path));
+  const missing = [...overrides.sectionsByPath.keys()].filter((path) => !existingPaths.has(path));
+  let applied = 0;
+  const nextPages = pages.map((page) => {
+    const sections = overrides.sectionsByPath.get(page.path);
+    if (!sections) return page;
+    applied += 1;
+    return { ...page, sections, sectionSource: "section-overrides" };
+  });
+  return {
+    pages: nextPages,
+    stats: {
+      source: "section-overrides",
+      path: overrides.sourcePath,
+      requested: overrides.sectionsByPath.size,
+      applied,
+      ...(missing.length ? { missing } : {}),
+    },
+  };
+}
+
 function inferSectionPlan(page) {
   const headings = page.headings.map((heading) => heading.text);
   const h1 = headings[0] || page.name;
   const supporting = headings.slice(1, 8);
   const desc = page.description || `Page at ${page.path}.`;
   const hero = {
-    name: page.type === "legal" ? "Header Section" : "Hero Header Section",
+    name: page.type === "legal" ? "Header" : "Hero Header",
     description: `${h1}. ${desc}`.slice(0, 520),
   };
   const contentSections = supporting.map((heading) => ({
-    name: `${heading.replace(/[.?!]+$/g, "")} Section`.slice(0, 90),
-    description: `Page section focused on "${heading}".`,
+    name: cleanSectionName(heading),
+    description: "",
   }));
 
   if (page.type === "article") {
     return [
       hero,
-      { name: "Article Body Section", description: supporting.length ? `Article content covering: ${supporting.slice(0, 5).join("; ")}.` : desc },
-      { name: "Related Articles Section", description: "Links to related articles, resources, or next reading recommendations." },
-      { name: "CTA Section", description: "Prompt readers to continue to a relevant next action." },
+      sectionPlanItem("Article Body", supporting.length ? `Article content covering: ${supporting.slice(0, 5).join("; ")}.` : desc),
+      sectionPlanItem("Related Articles", "Links to related articles, resources, or next reading recommendations."),
+      sectionPlanItem("CTA", "Prompt readers to continue to a relevant next action."),
     ];
   }
   if (page.type === "news") {
     return [
       hero,
-      { name: "News Article Body Section", description: supporting.length ? `News story content covering: ${supporting.slice(0, 5).join("; ")}.` : desc },
-      { name: "Related News Section", description: "Links to recent news, press releases, or featured updates." },
+      sectionPlanItem("News Article Body", supporting.length ? `News story content covering: ${supporting.slice(0, 5).join("; ")}.` : desc),
+      sectionPlanItem("Related News", "Links to recent news, press releases, or featured updates."),
     ];
   }
   if (page.type === "question") {
     return [
-      { name: "Question Header Section", description: `${h1}. ${desc}`.slice(0, 520) },
-      { name: "Answer Body Section", description: supporting.length ? `Answer content covering: ${supporting.slice(0, 5).join("; ")}.` : "Direct answer to a common visitor question." },
-      { name: "Contact Support Section", description: "Encourage users with additional questions to contact support." },
+      sectionPlanItem("Question Header", `${h1}. ${desc}`.slice(0, 520)),
+      sectionPlanItem("Answer Body", supporting.length ? `Answer content covering: ${supporting.slice(0, 5).join("; ")}.` : "Direct answer to a common visitor question."),
+      sectionPlanItem("Contact Support", "Encourage users with additional questions to contact support."),
     ];
   }
   if (page.type === "expert") {
     return [
-      { name: "Profile Header Section", description: `${page.name}. ${desc}`.slice(0, 520) },
-      { name: "Biography Section", description: supporting.length ? `Profile content covering: ${supporting.slice(0, 5).join("; ")}.` : "Professional background, role, expertise, and related content." },
-      { name: "Related Content Section", description: "Links to articles, news, or resources associated with this expert." },
+      sectionPlanItem("Profile Header", `${page.name}. ${desc}`.slice(0, 520)),
+      sectionPlanItem("Biography", supporting.length ? `Profile content covering: ${supporting.slice(0, 5).join("; ")}.` : "Professional background, role, expertise, and related content."),
+      sectionPlanItem("Related Content", "Links to articles, news, or resources associated with this expert."),
     ];
   }
   if (page.type === "success-story") {
     return [
-      { name: "Story Header Section", description: `${page.name}. ${desc}`.slice(0, 520) },
-      { name: "Personal Journey Section", description: supporting.length ? `Story content covering: ${supporting.slice(0, 5).join("; ")}.` : "User journey, challenge, experience, and outcomes." },
-      { name: "CTA Section", description: "Invite visitors to read more stories or begin the relevant conversion flow." },
+      sectionPlanItem("Story Header", `${page.name}. ${desc}`.slice(0, 520)),
+      sectionPlanItem("Personal Journey", supporting.length ? `Story content covering: ${supporting.slice(0, 5).join("; ")}.` : "User journey, challenge, experience, and outcomes."),
+      sectionPlanItem("CTA", "Invite visitors to read more stories or begin the relevant conversion flow."),
     ];
   }
   if (page.type === "legal") {
-    return [hero, { name: "Legal Page Body Section", description: "Full legal or policy content." }];
+    return [hero, sectionPlanItem("Legal Page Body", "Full legal or policy content.")];
   }
   if (page.type?.endsWith("-category") || page.type?.endsWith("-hub")) {
     return [
       hero,
-      { name: "Listing Grid Section", description: "Directory or listing of related pages." },
-      { name: "CTA Section", description: "Help visitors continue into relevant content or conversion paths." },
+      sectionPlanItem("Listing Grid", "Directory or listing of related pages."),
+      sectionPlanItem("CTA", "Help visitors continue into relevant content or conversion paths."),
     ];
   }
-  return [hero, ...contentSections.slice(0, 5), { name: "CTA Section", description: "Guide visitors toward the next relevant action or page." }];
+  return [hero, ...contentSections.slice(0, 5), sectionPlanItem("CTA", "Guide visitors toward the next relevant action or page.")];
 }
 
 async function mapWithConcurrency(items, worker, concurrency) {
@@ -470,6 +861,7 @@ function extractPageData(url, html, status, pathSet, baseUrl, config) {
     "";
   const canonical = extractFirst(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["'][^>]*>/i, html);
   const headings = extractHeadings(html);
+  const textBlocks = extractTextBlocks(html);
   const links = extractLinks(html, pathSet, baseUrl).filter((link) => link !== path);
   const type = inferPageType(path, config);
   return {
@@ -482,6 +874,7 @@ function extractPageData(url, html, status, pathSet, baseUrl, config) {
     description,
     type,
     headings,
+    textBlocks,
     links,
     sections: [],
   };
@@ -707,8 +1100,9 @@ async function commandCrawl(args) {
           description: `Failed to crawl: ${error.message}`,
           type,
           headings: [],
+          textBlocks: [],
           links: [],
-          sections: [{ name: "Page Placeholder Section", description: `Could not crawl ${url}: ${error.message}` }],
+          sections: [sectionPlanItem("Page Placeholder", `Could not crawl ${url}: ${error.message}`)],
         };
       }
     },
@@ -732,6 +1126,18 @@ function buildStats({ sourceSitemap, include, excludes = [], baseUrl, pages, rel
     statusCounts: Object.fromEntries([...pages.reduce((map, page) => map.set(page.status, (map.get(page.status) ?? 0) + 1), new Map())].sort()),
     typeCounts: Object.fromEntries([...pages.reduce((map, page) => map.set(page.type, (map.get(page.type) ?? 0) + 1), new Map())].sort()),
   };
+}
+
+function commandAnalyzeCms(args) {
+  if (!args.crawl) throw new Error("analyze-cms requires --crawl");
+  const crawl = readJson(absPath(args.crawl));
+  const config = args.config ? readJson(absPath(args.config)) : {};
+  const collections = detectCmsCollections(crawl.pages ?? [], config);
+  if (args.json) {
+    console.log(JSON.stringify(collections.map(cmsCollectionSummary), null, 2));
+    return;
+  }
+  console.log(cmsReport(collections));
 }
 
 function relumePage(page, subPages = [], pageType = "page", options = {}) {
@@ -767,8 +1173,8 @@ function syntheticPage(name, description, sections = []) {
     sections: sections.length
       ? sections
       : [
-          { name: "Directory Header Section", description },
-          { name: "Page Listing Section", description: `Visual grouping for ${name} pages.` },
+          sectionPlanItem("Directory Header", description),
+          sectionPlanItem("Page Listing", `Visual grouping for ${name} pages.`),
         ],
   };
 }
@@ -914,8 +1320,8 @@ function buildGenericTree(pages, config, options = {}) {
     const source =
       node.page ??
       syntheticPage(titleFromPath(node.path), `Pages under ${node.path}.`, [
-        { name: "Directory Header Section", description: `Pages under ${node.path}.` },
-        { name: "Page Listing Section", description: `Child pages in the ${node.path} path.` },
+        sectionPlanItem("Directory Header", `Pages under ${node.path}.`),
+        sectionPlanItem("Page Listing", `Child pages in the ${node.path} path.`),
       ]);
     return relumePage(source, childPages, isRoot || node.page ? "page" : "path", options);
   }
@@ -1057,14 +1463,53 @@ async function commandBuild(args) {
   const crawl = readJson(crawlPath);
   const config = args.config ? readJson(absPath(args.config)) : {};
   const pages = crawl.pages.map((page) => ({ ...page, sections: page.sections?.length ? page.sections : inferSectionPlan(page) }));
+  const cmsMode = normalizeCmsMode(args["cms-mode"] ?? config.cmsMode ?? "expanded");
+  const cmsInclude = parsePathList(args["cms-include"] ?? config.cmsInclude);
+  const cmsExclude = parsePathList(args["cms-exclude"] ?? config.cmsExclude);
+  const cmsCollections = detectCmsCollections(pages, config);
+  const cmsBuild =
+    cmsMode === "templates"
+      ? applyCmsTemplateMode(pages, cmsCollections, { include: cmsInclude, exclude: cmsExclude })
+      : { pages, collapsedCollections: [] };
   const useCustomGroups = Boolean(args["custom-groups"] && config.groups?.length);
   const sectionMode = normalizeSectionMode(args["no-sections"] ? "none" : args.sections ?? config.sections ?? "include");
-  const buildOptions = { includeSections: sectionMode === "include" };
-  const tree = useCustomGroups ? buildConfiguredTree(pages, config, buildOptions) : buildGenericTree(pages, config, buildOptions);
+  const sectionOverrides =
+    sectionMode !== "none" ? loadSectionOverrides(args["section-overrides"] ?? config.sectionOverrides) : null;
+  const overrideSections = sectionOverrides ? applySectionOverrides(cmsBuild.pages, sectionOverrides) : null;
+  const sectionPages = overrideSections?.pages ?? cmsBuild.pages;
+  const buildOptions = { includeSections: sectionMode !== "none" };
+  const tree = useCustomGroups ? buildConfiguredTree(sectionPages, config, buildOptions) : buildGenericTree(sectionPages, config, buildOptions);
   const relumePageCount = countRelumePages(tree);
   const payload = { type: "page", state: tree, globalSections: globalSections(config.siteName) };
   const payloadHtml = `<meta charset="utf-8"><p data-blocks-payload-v1="${escapeHtmlAttribute(JSON.stringify(payload))}"></p>`;
-  const stats = { ...crawl.stats, relumePageCount, sections: sectionMode };
+  const stats = {
+    ...crawl.stats,
+    relumePageCount,
+    sections: sectionMode,
+    ...(sectionMode === "ai"
+      ? {
+          aiSections: overrideSections
+            ? {
+                enabled: true,
+                used: overrideSections.stats.applied > 0,
+                source: "section-overrides",
+                path: overrideSections.stats.path,
+                applied: overrideSections.stats.applied,
+              }
+            : {
+                enabled: true,
+                used: false,
+                source: "extracted-fallback",
+                fallback: "include",
+                error: "--sections ai requires --section-overrides in this CLI version.",
+              },
+        }
+      : {}),
+    ...(overrideSections ? { sectionOverrides: overrideSections.stats } : {}),
+    cmsMode,
+    cmsCollectionsDetected: cmsCollections.length,
+    ...(cmsBuild.collapsedCollections.length ? { cmsTemplateCollections: cmsBuild.collapsedCollections } : {}),
+  };
   const siteName = config.siteName ?? "Generated";
   writeJson(join(outDir, "sitemap-tree.json"), tree);
   writeJson(join(outDir, "relume-payload.json"), payload);
@@ -1140,6 +1585,7 @@ async function main() {
   if (command === "inspect") return commandInspect(args);
   if (command === "discover") return commandDiscover(args);
   if (command === "crawl") return commandCrawl(args);
+  if (command === "analyze-cms") return commandAnalyzeCms(args);
   if (command === "build") return commandBuild(args);
   if (command === "copy") return commandCopy(args);
   if (command === "validate") return commandValidate(args);

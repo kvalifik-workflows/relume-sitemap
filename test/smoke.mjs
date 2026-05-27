@@ -141,6 +141,8 @@ try {
   assert.equal(payload.state.name, "Example Home");
   assert.equal(payload.state.subPages.length, 2);
   assert.ok(payload.state.sections.length > 0);
+  assert.doesNotMatch(JSON.stringify(payload), / Section"/);
+  assert.doesNotMatch(JSON.stringify(payload), /Page section focused/);
   assert.match(
     runFailure(["copy", "--payload", join(withSections, "relume-payload.html")], { env: { RELUME_SITEMAP_TEST_PLATFORM: "linux" } }),
     /copy currently requires macOS/,
@@ -193,6 +195,70 @@ try {
   const ungroupedNode = prefixPayload.state.subPages.find((page) => page.name === "Ungrouped");
   assert.deepEqual(blogNode.subPages.map((page) => page.name), ["Post"]);
   assert.deepEqual(ungroupedNode.subPages.map((page) => page.name), ["Blogger"]);
+
+  const overridePath = join(temp, "section-overrides.json");
+  writeFileSync(
+    overridePath,
+    `${JSON.stringify(
+      {
+        pages: [
+          {
+            path: "/",
+            sections: [
+              { name: "Hero Section", description: 'Page section focused on "Hero".' },
+              { name: "Featured Work Section", description: "" },
+            ],
+          },
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const overrideOut = join(temp, "override-out");
+  run(["build", "--crawl", fixture, "--out", overrideOut, "--sections", "ai", "--section-overrides", overridePath]);
+  const overridePayload = JSON.parse(readFileSync(join(overrideOut, "relume-payload.json"), "utf8"));
+  const overrideSitemap = readFileSync(join(overrideOut, "sitemap.md"), "utf8");
+  assert.deepEqual(
+    overridePayload.state.sections.filter((section) => section.type === "inline").map((section) => section.value.name),
+    ["Hero", "Featured Work"],
+  );
+  assert.doesNotMatch(JSON.stringify(overridePayload), /Page section focused/);
+  assert.match(overrideSitemap, /"source": "section-overrides"/);
+
+  const cmsCrawl = join(temp, "cms-crawl.json");
+  writeFileSync(
+    cmsCrawl,
+    `${JSON.stringify(
+      {
+        stats: { crawledAt: "2026-05-07T00:00:00.000Z", sourceSitemap: "fixture", include: "/", baseUrl: "https://example.com", urlCount: 8 },
+        pages: [
+          { url: "https://example.com/", path: "/", status: 200, name: "Home", title: "Home", description: "", type: "home", headings: [], links: [], sections: [] },
+          { url: "https://example.com/blog", path: "/blog", status: 200, name: "Blog", title: "Blog", description: "", type: "page", headings: [], links: [], sections: [] },
+          ...Array.from({ length: 6 }, (_, index) => ({
+            url: `https://example.com/blog/post-${index + 1}`,
+            path: `/blog/post-${index + 1}`,
+            status: 200,
+            name: `Post ${index + 1}`,
+            title: `Post ${index + 1}`,
+            description: "",
+            type: "page",
+            headings: [{ level: 1, text: `Post ${index + 1}` }],
+            links: [],
+            sections: [],
+          })),
+        ],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  assert.match(run(["analyze-cms", "--crawl", cmsCrawl]), /\/blog -> Blog Post Template/);
+  const cmsOut = join(temp, "cms-out");
+  run(["build", "--crawl", cmsCrawl, "--out", cmsOut, "--cms-mode", "templates"]);
+  const cmsPayload = JSON.parse(readFileSync(join(cmsOut, "relume-payload.json"), "utf8"));
+  const cmsBlog = cmsPayload.state.subPages.find((page) => page.name === "Blog");
+  assert.deepEqual(cmsBlog.subPages.map((page) => page.name), ["Blog Post Template"]);
 
   const escapingConfig = join(temp, "escaping-config.json");
   writeFileSync(escapingConfig, `${JSON.stringify({ siteName: '<Site & "Name">' }, null, 2)}\n`);
